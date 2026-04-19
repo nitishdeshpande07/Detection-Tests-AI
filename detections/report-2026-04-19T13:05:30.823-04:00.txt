@@ -1,0 +1,303 @@
+### Incident Analysis: Bring Your Own Vulnerable Driver (BYOVD) Detection
+
+#### 1. Core Technical Detection Artifacts
+
+**Windows-Based Identifiers**
+
+*   **Driver Loading & Service Creation:**
+    *   `Event ID 7045` (Service Control Manager): A service was installed on the system.
+        *   **Fields:** `ServiceName`, `ImagePath`, `ServiceType`, `StartType`, `AccountName`.
+        *   **Indicators:** New service creation, `ServiceType` = `Kernel Driver` or `File System Driver`, `ImagePath` pointing to a `.sys` file.
+    *   `Event ID 4697` (Security Auditing): A service was installed in the system. (Similar to 7045, often provides `ServiceName`, `DisplayName`, `ServiceType`, `StartType`, `ServiceAccount`, `ImagePath`).
+    *   `Sysmon Event ID 6` (Driver Loaded): Directly indicates a driver being loaded into the kernel. (Requires specific Sysmon configuration for driver load monitoring).
+        *   **Fields:** `Image`, `Hashes`, `Signed`, `Signature`, `SignatureStatus`.
+        *   **Indicators:** Unsigned drivers (though BYOVD uses signed), known vulnerable driver hashes/names, drivers loaded from unusual paths.
+    *   `Sysmon Event ID 1` (Process Creation): Detection of tools used to install/start services.
+        *   **Fields:** `Image`, `CommandLine`, `ParentImage`, `ParentCommandLine`.
+        *   **Indicators:** `sc.exe create/start`, `net.exe start`, `PowerShell.exe` cmdlets (`New-Service`, `Start-Service`), custom driver loaders. Look for suspicious parent processes executing these.
+    *   `Sysmon Event ID 11` (File Creation): Creation of the `.sys` driver file.
+        *   **Fields:** `TargetFilename`, `Image`, `CreationUtcTime`.
+        *   **Indicators:** New `.sys` files written to `C:\Windows\System32\drivers\` or temporary directories (e.g., `C:\Windows\Temp\`, user profile `Temp`).
+    *   `Sysmon Event ID 12/13/14` (Registry Event: Object create/delete/value set): Creation or modification of driver service registry keys.
+        *   **Fields:** `EventType`, `TargetObject`, `Details`.
+        *   **Indicators:** Keys under `HKLM\SYSTEM\CurrentControlSet\Services\<DriverName>` being created or modified, especially `ImagePath` and `Type` values.
+    *   `Sysmon Event ID 23` (File Delete): Deletion of the `.sys` file after successful loading (attacker trying to hide traces).
+        *   **Fields:** `TargetFilename`, `Image`.
+        *   **Indicators:** Deletion of `.sys` files from driver directories by non-system processes.
+*   **Kernel Interaction & Exploitation:**
+    *   `Sysmon Event ID 17/18` (Named Pipe Creation/Connection): If attackers use named pipes for IPC between user-mode processes and their loaded kernel driver.
+    *   Specific EDR/Kernel sensors might detect direct API calls to `NtLoadDriver`, `NtSetSystemInformation` (for modifying kernel objects), or `MmMapIoSpace`.
+*   **Security Tool Tampering/Bypass (Post-Exploitation):**
+    *   `Event ID 4656/4658/4663` (Object Access Auditing): Failed or successful attempts to access, modify, or delete sensitive objects (e.g., EDR/AV service executables, registry keys, process memory). Requires SACL configuration.
+    *   `Event ID 4670` (Permissions changed on an object): Modification of DACLs on security product files or registry keys.
+    *   `Sysmon Event ID 1` (Process Creation) / `Sysmon Event ID 25` (Process Tampering - Windows 10+):
+        *   **Indicators:** `taskkill /IM <SecurityAgent.exe>`, `net stop <SecurityService>`, `sc.exe stop <SecurityService>`, attempts to terminate/suspend EDR processes, modify their memory or inject malicious code.
+        *   **Indicators:** `Pstools` utilities (e.g., `PsExec.exe`) used by the attacker to launch commands post-exploitation.
+    *   `Sysmon Event ID 7` (Image Loaded): Security tool DLLs being unloaded, or suspicious DLLs loaded into security processes.
+
+**Linux-Based Identifiers (Analogous Kernel Module Loading)**
+
+BYOVD as described is primarily a Windows technique involving `.sys` drivers. However, analogous kernel-level attacks on Linux involve loading vulnerable kernel modules (`.ko` files).
+
+*   **Kernel Module Loading:**
+    *   `auditd` Logs (`/var/log/audit/audit.log`):
+        *   **System Calls:** `syscall=init_module`, `syscall=finit_module` (for loading/unloading modules).
+        *   **Process Execution:** `type=EXECVE` or `type=PROCTITLE` for `insmod`, `modprobe`, `rmmod`.
+        *   **File Access:** `type=PATH` for reads/writes to `/lib/modules/<kernel-version>/kernel/drivers/` or temporary `.ko` files.
+    *   `Syslog` / `dmesg` (`/var/log/kern.log`, `/var/log/messages`):
+        *   **Indicators:** Messages related to kernel module loading, errors during loading, or warnings from new modules.
+    *   **File System Monitoring:**
+        *   **Indicators:** New `.ko` files created in `/lib/modules/<kernel-version>/kernel/drivers/` or `/tmp`.
+*   **Security Tool Tampering/Bypass:**
+    *   `auditd` Logs: Attempts to disable SELinux/AppArmor (`setenforce 0`), modify `iptables` rules, terminate security agents (e.g., using `kill -9`).
+    *   `Syslog`: Warnings or errors from security modules or daemon crashes.
+
+#### 2. MITRE ATT&CK TTPs
+
+*   **TA0004 - Privilege Escalation**
+    *   **T1068 - Exploitation for Privilege Escalation:** Specifically kernel exploitation via vulnerable drivers.
+    *   **T1543.003 - Create or Modify System Process: Windows Service:** Creating a new service for the vulnerable driver.
+*   **TA0005 - Defense Evasion**
+    *   **T1562.001 - Impair Defenses: Disable or Modify System Firewall:** If the driver grants network control.
+    *   **T1562.002 - Impair Defenses: Disable or Modify Tools:** Disabling or tampering with EDR/AV, often the primary goal post-BYOVD.
+    *   **T1548.002 - Bypass User Account Control:** If the driver loading mechanism allows bypassing UAC.
+    *   **T1070.004 - File Deletion:** Deleting the `.sys` file after loading to hide evidence.
+    *   **T1070.006 - Timestomp:** Modifying timestamps of artifacts to evade detection.
+*   **TA0003 - Persistence**
+    *   **T1543.003 - Create or Modify System Process: Windows Service:** Configuring the driver service for automatic startup.
+*   **TA0002 - Execution**
+    *   **T1059 - Command and Scripting Interpreter:** Using `cmd.exe` or `powershell.exe` to interact with services (e.g., `sc.exe`, `net.exe`).
+    *   **T1106 - Native API:** Direct API calls to interact with kernel services for driver loading.
+
+#### 3. Detection Logic (KQL/EQL)
+
+**KQL (Azure Sentinel / Microsoft 365 Defender)**
+
+**1. New Kernel Driver Service Installation:**
+
+```kql
+// Detects new service installations, focusing on kernel drivers
+SecurityEvent
+| where EventID == 7045 or EventID == 4697 // Service installed
+| extend ServiceType = tostring(EventData.ServiceType)
+| extend ImagePath = tostring(EventData.ImagePath)
+| extend ServiceName = tostring(EventData.ServiceName)
+| where ServiceType contains "kernel" or ServiceType contains "file system" // Filter for driver types
+| where isnotempty(ImagePath) and ImagePath endswith ".sys" // Ensure it's a driver file
+| where not(ImagePath contains "C:\\Windows\\System32\\drivers\\") or // New drivers outside standard path
+        (ImagePath contains "C:\\Windows\\System32\\drivers\\" and not(ServiceName in~ ("WdBoot", "WdFilter", "MpFilter", "MsMpSvc", "NetBT", "RDPREFMP") and ImagePath contains "Windows")) // Exclude known system drivers (expand as needed)
+| extend Process = tostring(EventData.ProcessName) // If available, Process that installed the service
+| project TimeGenerated, Computer, ServiceName, ImagePath, ServiceType, EventID, Process, AccountName = tostring(EventData.AccountName)
+| join kind=leftouter (
+    DeviceFileEvents
+    | where ActionType == "FileCreated" and FileName endswith ".sys"
+    | project TimeGenerated, DeviceName, FolderPath, FileName, InitiatingProcessFileName, SHA256, GlobalId
+) on $left.Computer == $right.DeviceName and $left.ImagePath contains $right.FileName
+| extend InitiatingProcess = iif(isnotempty(InitiatingProcessFileName), InitiatingProcessFileName, Process)
+| extend DriverSHA256 = SHA256
+| where ImagePath !contains "Program Files" and ImagePath !contains "ProgramData" // Exclude non-driver paths often seen with installers
+| where not(ImagePath startswith "C:\\Program Files" and ServiceType in ("user mode service", "own process")) // Refine to focus on drivers
+```
+
+**2. Sysmon Driver Load (if Event ID 6 is enabled):**
+
+```kql
+// Detects loading of specific vulnerable drivers or unsigned drivers
+DeviceImageLoadEvents
+| where InitiatingProcessCommandLine !contains "ntoskrnl.exe" // Exclude native kernel loads
+| where FileName endswith ".sys"
+| extend DriverPath = FolderPath // Sysmon 6 doesn't always have full path, use Image field if available
+| extend DriverHash = SHA256 // Assuming Sysmon 6 provides hashes
+| where SignatureStatus == "Invalid" or SignatureStatus == "NotFound" // Unsigned drivers
+   or DriverHash in ("<KnownVulnerableDriverSHA256_1>", "<KnownVulnerableDriverSHA256_2>") // Specific known hashes
+   or FileName in~ ("gdrv.sys", "dbutil_2_3.sys", "rtc.sys", "capcom.sys") // Specific known vulnerable filenames
+   or (FolderPath !startswith "C:\\Windows\\System32\\drivers\\" and FolderPath !startswith "C:\\Windows\\WinSxS\\") // Drivers loaded from unusual locations
+| project TimeGenerated, DeviceName, InitiatingProcessName, InitiatingProcessCommandLine, FileName, DriverPath, DriverHash, Signed, Signature, SignatureStatus
+```
+
+**3. Suspicious Driver File Creation followed by Deletion:**
+
+```kql
+// Detects driver file creation followed by quick deletion (attempt to hide)
+let file_creations = DeviceFileEvents
+| where ActionType == "FileCreated" and FileName endswith ".sys"
+| where FolderPath contains "C:\\Windows\\System32\\drivers\\" or FolderPath contains "C:\\Windows\\Temp\\";
+let file_deletions = DeviceFileEvents
+| where ActionType == "FileDeleted" and FileName endswith ".sys"
+| where FolderPath contains "C:\\Windows\\System32\\drivers\\" or FolderPath contains "C:\\Windows\\Temp\\";
+file_creations
+| join kind=inner (
+    file_deletions
+    | project TimeGenerated_Delete = TimeGenerated, DeviceName_Delete = DeviceName, FileName_Delete = FileName, SHA256_Delete = SHA256
+) on $left.DeviceName == $right.DeviceName_Delete and $left.FileName == $right.FileName_Delete
+| where TimeGenerated_Delete between (TimeGenerated .. TimeGenerated + 10m) // Deletion within 10 minutes of creation
+| project TimeGenerated_Create = TimeGenerated, TimeGenerated_Delete, DeviceName, FileName, InitiatingProcessFileName_Create = InitiatingProcessFileName, InitiatingProcessCommandLine_Create = InitiatingProcessCommandLine, SHA256_Create = SHA256_Delete
+```
+
+**4. EDR/Security Tool Tampering Attempts:**
+
+```kql
+// Detects attempts to stop or kill security services/processes
+DeviceProcessEvents
+| where ActionType == "ProcessCreated"
+| where InitiatingProcessFileName in~ ("cmd.exe", "powershell.exe")
+| where (
+    CommandLine has_any ("sc stop", "net stop", "taskkill /IM", "taskkill /F /IM")
+    and CommandLine has_any ("MsMpEng.exe", "SenseNdr.exe", "RdrService.exe", "sophos", "crowdstrike", "defender", "carbonblack") // Common security tool names
+)
+// Add logic to correlate with prior driver loading events if possible
+| project TimeGenerated, DeviceName, InitiatingProcessFileName, CommandLine, InitiatingProcessParentFileName, InitiatingProcessParentCommandLine
+```
+
+**EQL (Elastic Security)**
+
+**1. New Kernel Driver Service Installation:**
+
+```eql
+// Detects new service installations, focusing on kernel drivers
+// Requires Windows event logs (7045/4697) forwarded to Elastic
+sequence by host.name
+  [windows.eventdata.event_id == "7045" or windows.eventdata.event_id == "4697"]
+  [windows.eventdata.service_type : ("kernel driver", "file system driver") and
+   windows.eventdata.image_path : "*.sys" and
+   not windows.eventdata.image_path : ("C:\\Windows\\System32\\drivers\\WdBoot.sys", "C:\\Windows\\System32\\drivers\\WdFilter.sys", "C:\\Windows\\System32\\drivers\\MpFilter.sys")]
+```
+
+**2. Sysmon Driver Load (Event ID 6):**
+
+```eql
+// Detects loading of specific vulnerable drivers or unsigned drivers
+// Requires Sysmon Event ID 6 (DriverLoaded)
+driver where event.action == "driver_loaded" and
+  (driver.hash.sha256 : ("<KnownVulnerableDriverSHA256_1>", "<KnownVulnerableDriverSHA256_2>") or
+   driver.file.name : ("gdrv.sys", "dbutil_2_3.sys", "rtc.sys", "capcom.sys") or
+   driver.signature.status != "valid" or
+   not driver.file.path : ("C:\\Windows\\System32\\drivers\\*", "C:\\Windows\\WinSxS\\*")) and
+  not process.executable : "C:\\Windows\\System32\\ntoskrnl.exe"
+```
+
+**3. Suspicious Driver File Creation followed by Deletion:**
+
+```eql
+// Detects driver file creation followed by quick deletion
+// Requires Sysmon Event ID 11 (FileCreate) and 23 (FileDelete)
+sequence by host.name, file.hash.sha256
+  [file where event.action == "file_create" and file.extension == "sys" and
+    file.path : ("C:\\Windows\\System32\\drivers\\*", "C:\\Windows\\Temp\\*")]
+  [file where event.action == "file_delete" and file.extension == "sys" and
+    file.path : ("C:\\Windows\\System32\\drivers\\*", "C:\\Windows\\Temp\\*")]
+until [process where event.duration > 10m]
+```
+
+**4. EDR/Security Tool Tampering Attempts:**
+
+```eql
+// Detects attempts to stop or kill security services/processes
+process where event.action == "process_started" and
+  (process.name : ("cmd.exe", "powershell.exe") and
+   process.args : ("sc stop", "net stop", "taskkill /IM", "taskkill /F /IM") and
+   process.args : ("MsMpEng.exe", "SenseNdr.exe", "RdrService.exe", "sophos", "crowdstrike", "defender", "carbonblack"))
+```
+
+**Linux (Analogous Kernel Module Loading) - EQL Example:**
+
+```eql
+// Detects kernel module loading via insmod/modprobe
+// Requires Auditd logs or similar for execve events
+process where event.action == "process_started" and
+  process.name : ("insmod", "modprobe") and
+  not user.name in ("root", "systemd") // Exclude known legitimate module loads if possible
+```
+
+#### 4. Rough Detection Rule Structure
+
+**Rule Name:** Windows - Suspected BYOVD Driver Installation
+
+**Severity:** Critical
+
+**Description:** Detects the installation of a new kernel or file system driver, which could indicate a Bring Your Own Vulnerable Driver (BYOVD) attack. This technique allows attackers with administrative privileges to load a legitimate, but vulnerable, signed driver to gain Ring 0 execution and bypass security controls.
+
+**MITRE ATT&CK TTPs:**
+*   TA0004 - Privilege Escalation: T1068 (Exploitation for Privilege Escalation), T1543.003 (Create or Modify System Process: Windows Service)
+*   TA0005 - Defense Evasion: T1562.002 (Impair Defenses: Disable or Modify Tools)
+
+**Query (KQL Example):**
+
+```kql
+// Rule: Windows - Suspected BYOVD Driver Installation
+SecurityEvent
+| where EventID == 7045 or EventID == 4697
+| extend ServiceType = tostring(EventData.ServiceType)
+| extend ImagePath = tostring(EventData.ImagePath)
+| extend ServiceName = tostring(EventData.ServiceName)
+| where ServiceType contains "kernel" or ServiceType contains "file system"
+| where isnotempty(ImagePath) and ImagePath endswith ".sys"
+| where not(ImagePath contains "C:\\Windows\\System32\\drivers\\") or
+        (ImagePath contains "C:\\Windows\\System32\\drivers\\" and not(ServiceName in~ ("WdBoot", "WdFilter", "MpFilter", "MsMpSvc", "NetBT", "RDPREFMP") and ImagePath contains "Windows")) // Exclude some common legitimate drivers
+| project TimeGenerated, Computer, ServiceName, ImagePath, ServiceType, EventID, Process = tostring(EventData.ProcessName), AccountName = tostring(EventData.AccountName)
+```
+
+**Thresholds:** N/A (single event detection)
+
+**False Positive Considerations:**
+*   Legitimate software installations that require new kernel drivers (e.g., virtualization software, anti-cheat, certain hardware drivers). These should be baselined and added to allow lists.
+*   Security software that installs its own kernel drivers.
+*   System updates may occasionally install new drivers.
+
+---
+
+**Rule Name:** Windows - Known Vulnerable Driver Hash Loaded
+
+**Severity:** Critical
+
+**Description:** Identifies the loading of a driver with a hash known to be associated with documented BYOVD vulnerabilities. Attackers often reuse these drivers.
+
+**MITRE ATT&CK TTPs:**
+*   TA0004 - Privilege Escalation: T1068 (Exploitation for Privilege Escalation)
+*   TA0005 - Defense Evasion: T1562.002 (Impair Defenses: Disable or Modify Tools)
+
+**Query (KQL Example):**
+
+```kql
+// Rule: Windows - Known Vulnerable Driver Hash Loaded
+DeviceImageLoadEvents
+| where FileName endswith ".sys"
+| where SHA256 in (
+    "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b", // Example hash for gdrv.sys
+    "A1B2C3D4E5F6A7B8C9D0E1F2A3B4C5D6E7F8A9B0C1D2E3F4A5B6C7D8E9F0A1B2"  // Example hash for dbutil_2_3.sys
+    // Add more known vulnerable driver SHA256 hashes
+)
+| project TimeGenerated, DeviceName, InitiatingProcessName, InitiatingProcessCommandLine, FileName, FolderPath, SHA256, Signed, Signature, SignatureStatus
+```
+
+**Thresholds:** N/A
+
+**False Positive Considerations:**
+*   Highly unlikely if the hash list is accurate and kept up-to-date with known malicious drivers. A legitimate system might retain an old vulnerable driver, but its loading by a suspicious process is still critical.
+
+---
+
+**Rule Name:** Linux - Suspicious Kernel Module Load
+
+**Severity:** High
+
+**Description:** Detects attempts to load new kernel modules using `insmod` or `modprobe` by non-root or non-system processes, which could indicate a local privilege escalation attempt or a kernel-level attack akin to BYOVD.
+
+**MITRE ATT&CK TTPs:**
+*   TA0004 - Privilege Escalation: T1068 (Exploitation for Privilege Escalation)
+
+**Query (EQL Example - assuming auditd logs are ingested):**
+
+```eql
+// Rule: Linux - Suspicious Kernel Module Load
+process where event.action == "process_started" and
+  process.name : ("insmod", "modprobe") and
+  not user.name in ("root", "systemd", "kubelet") and // Exclude common legitimate users/services
+  not process.parent.name in ("systemd", "kernel") // Exclude parent processes if known to load modules
+```
+
+**Thresholds:** N/A
+
+**False Positive Considerations:**
+*   Legitimate software installations or updates that install new kernel modules. These should be baselined and added to allow lists.
+*   Container orchestration tools (e.g., Kubernetes) that might load specific modules.

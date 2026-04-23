@@ -1,0 +1,60 @@
+# 🛡️ Detection Validation Report
+
+Generated at: 2026-04-23T04:22:01.509Z
+
+| ID | Query | Matches | Result |
+|----|-------|---------|--------|
+| 1 | `file.extension:sys AND event.category:file AND event.action:creation AND file.path:"C\:\\Windows\\System32\\drivers\\NsecKrnl.sys"` | 0 | ❌ NOT FOUND |
+| 2 | `file.extension:sys AND event.category:file AND event.action:creation AND file.path:"C\:\\Windows\\Temp\\NsecKrnl.sys"` | 0 | ❌ NOT FOUND |
+| 3 | `file.extension:sys AND event.category:file AND event.action:creation AND file.path:"*\\Users\\*\\AppData\\Local\\Temp\\NsecKrnl.sys"` | 0 | ❌ NOT FOUND |
+| 4 | `file.hash.md5:KNOWN_NSEC_KRNL_MD5_HASH AND event.category:file AND event.action:creation` | 0 | ❌ NOT FOUND |
+| 5 | `file.hash.sha1:KNOWN_NSEC_KRNL_SHA1_HASH AND event.category:file AND event.action:creation` | 0 | ❌ NOT FOUND |
+| 6 | `file.hash.sha256:KNOWN_NSEC_KRNL_SHA256_HASH AND event.category:file AND event.action:creation` | 0 | ❌ NOT FOUND |
+| 7 | `winlog.event_id:11 AND file.extension:sys AND file.path:"C\:\\Windows\\System32\\drivers\\*"` | 0 | ❌ NOT FOUND |
+| 8 | `winlog.event_id:11 AND file.extension:sys AND file.path:"C\:\\Windows\\Temp\\*"` | 0 | ❌ NOT FOUND |
+| 9 | `winlog.event_id:26 AND file.extension:sys` | 0 | ❌ NOT FOUND |
+| 10 | `winlog.event_id:29 AND file.name:NsecKrnl.sys` | 0 | ❌ NOT FOUND |
+| 11 | `process.name:sc.exe AND process.command_line:create AND process.command_line:"type= kernel" AND process.command_line:"binpath=*.sys"` | 0 | ❌ NOT FOUND |
+| 12 | `process.name:sc.exe AND process.command_line:start AND process.command_line:NsecKrnl` | 0 | ❌ NOT FOUND |
+| 13 | `process.name:taskkill.exe AND process.command_line:MsMpEng.exe` | 0 | ❌ NOT FOUND |
+| 14 | `process.name:taskkill.exe AND process.command_line:csagent.exe` | 0 | ❌ NOT FOUND |
+| 15 | `process.name:taskkill.exe AND process.command_line:splunkd.exe` | 0 | ❌ NOT FOUND |
+| 16 | `winlog.event_id:1 AND process.name:sc.exe AND process.command_line:create AND process.command_line:"type= kernel" AND process.command_line:"binpath=*.sys"` | 0 | ❌ NOT FOUND |
+| 17 | `winlog.event_id:1 AND process.name:taskkill.exe AND process.command_line:MsMpEng.exe` | 0 | ❌ NOT FOUND |
+| 18 | `winlog.event_id:17 AND pipe.name:*` | 0 | ❌ NOT FOUND |
+| 19 | `winlog.event_id:18 AND pipe.name:*` | 0 | ❌ NOT FOUND |
+| 20 | `winlog.event_id:25` | 0 | ❌ NOT FOUND |
+| 21 | `registry.path:"*\\SYSTEM\\CurrentControlSet\\Services\\NsecKrnl\\ImagePath" AND registry.value:"*.sys"` | 0 | ❌ NOT FOUND |
+| 22 | `registry.path:"*\\SYSTEM\\CurrentControlSet\\Services\\NsecKrnl\\Type" AND registry.value:"1"` | 0 | ❌ NOT FOUND |
+| 23 | `registry.path:"*\\SYSTEM\\CurrentControlSet\\Services\\NsecKrnl\\Start" AND registry.value:("0" OR "1")` | 0 | ❌ NOT FOUND |
+| 24 | `winlog.event_id:12 AND registry.path:"*\\SYSTEM\\CurrentControlSet\\Services\\NsecKrnl*"` | 0 | ❌ NOT FOUND |
+| 25 | `winlog.event_id:13 AND registry.path:"*\\SYSTEM\\CurrentControlSet\\Services\\NsecKrnl\\ImagePath"` | 0 | ❌ NOT FOUND |
+| 26 | `winlog.event_id:13 AND registry.path:"*\\SYSTEM\\CurrentControlSet\\Services\\NsecKrnl\\Type" AND registry.value:"1"` | 0 | ❌ NOT FOUND |
+| 27 | `winlog.event_id:13 AND registry.path:"*\\SYSTEM\\CurrentControlSet\\Services\\NsecKrnl\\Start" AND registry.value:("0" OR "1")` | 0 | ❌ NOT FOUND |
+| 28 | `winlog.event_id:14 AND registry.path:"*\\SYSTEM\\CurrentControlSet\\Services\\NsecKrnl*"` | 0 | ❌ NOT FOUND |
+| 29 | `winlog.event_id:6 AND dll.name:NsecKrnl.sys AND file.pe.signatures.signed:true AND file.pe.signatures.status:valid` | 0 | ❌ NOT FOUND |
+| 30 | `winlog.event_id:6 AND dll.name:NsecKrnl.sys AND file.pe.signatures.signed:false` | 0 | ❌ NOT FOUND |
+| 31 | `winlog.event_id:6 AND dll.name:*.sys AND file.pe.signatures.signed:false` | 0 | ❌ NOT FOUND |
+| 32 | `winlog.event_id:4697 AND service.name:NsecKrnl AND service.file.path:"*.sys"` | 0 | ❌ NOT FOUND |
+| 33 | `winlog.event_id:7045 AND service.name:NsecKrnl AND service.file.path:"*.sys"` | 0 | ❌ NOT FOUND |
+| 34 | `winlog.event_id:7036 AND service.name:NsecKrnl` | 0 | ❌ NOT FOUND |
+| 35 | `winlog.event_id:(7000 OR 7026) AND service.name:NsecKrnl` | 0 | ❌ NOT FOUND |
+| 36 | `winlog.event_id:10 AND winlog.provider_name:"Microsoft-Windows-Kernel-PnP/Configuration" AND winlog.event_data.DeviceName:*NsecKrnl*` | 0 | ❌ NOT FOUND |
+| 37 | `winlog.event_id:12 AND winlog.provider_name:"Microsoft-Windows-Kernel-PnP/Configuration" AND winlog.event_data.DeviceName:*NsecKrnl*` | 0 | ❌ NOT FOUND |
+| 38 | `event.category:process AND event.action:end AND process.name:(MsMpEng.exe OR csagent.exe OR splunkd.exe OR carbonblack.exe OR sentinelone.exe OR defender.exe)` | 0 | ❌ NOT FOUND |
+| 39 | `file.path:"C\:\\Program Files\\CrowdStrike\\csagent.exe" AND (event.action:deletion OR event.action:change)` | 0 | ❌ NOT FOUND |
+| 40 | `registry.path:"*\\CrowdStrike\\*" AND (event.action:deletion OR event.action:change)` | 0 | ❌ NOT FOUND |
+| 41 | `event.category:file AND event.action:creation AND file.name:("README.txt" OR "RECOVER_MY_FILES.txt" OR "*.html")` | 0 | ❌ NOT FOUND |
+| 42 | `event.category:file AND event.action:change AND file.extension:(encrypted_ext_1 OR encrypted_ext_2)` | 0 | ❌ NOT FOUND |
+| 43 | `winlog.event_id:11 AND file.name:("README.txt" OR "RECOVER_MY_FILES.txt")` | 0 | ❌ NOT FOUND |
+| 44 | `winlog.event_id:23 AND file.extension:(doc OR xls OR jpg OR pdf OR zip OR rar OR db OR sql OR bak OR psd OR ppt OR mov OR mp4 OR wmv)` | 0 | ❌ NOT FOUND |
+| 45 | `host.os.type:linux AND auditd.syscall.type:execve AND host.architecture:x86_64` | 0 | ❌ NOT FOUND |
+| 46 | `host.os.type:linux AND auditd.path.name:* AND (event.action:creation OR event.action:change)` | 0 | ❌ NOT FOUND |
+| 47 | `host.os.type:linux AND process.executable:/usr/bin/sudo AND process.command_line:sudo*` | 0 | ❌ NOT FOUND |
+| 48 | `event.dataset:auth AND event.type:authentication AND service.name:sshd AND event.outcome:failure` | 0 | ❌ NOT FOUND |
+| 49 | `event.dataset:auth AND event.type:authentication AND service.name:sshd AND event.outcome:success AND NOT user.name:(root OR admin OR known_user_1)` | 0 | ❌ NOT FOUND |
+| 50 | `network.direction:outbound AND destination.ip:("KNOWN_C2_IP_1" OR "KNOWN_C2_IP_2")` | 0 | ❌ NOT FOUND |
+| 51 | `network.direction:outbound AND destination.port:(8080 OR 4443 OR 6667 OR 9001) AND NOT destination.port:(80 OR 443 OR 21 OR 22 OR 23 OR 25 OR 53 OR 110 OR 139 OR 143 OR 3389 OR 445 OR 587 OR 993 OR 995)` | 0 | ❌ NOT FOUND |
+| 52 | `dns.question.name:("malicious.com" OR "bad.domain" OR "*.ru" OR "*.cn")` | 0 | ❌ NOT FOUND |
+| 53 | `http.request.method:POST AND url.path:(*.php?cmd=* OR *.asp?command=* OR *.jsp?exec=*)` | 0 | ❌ NOT FOUND |
+| 54 | `http.request.method:POST AND url.path:(*.php OR *.asp OR *.jsp) AND http.response.status_code:200 AND NOT user_agent.original:(legitimate_user_agent_1 OR legitimate_user_agent_2)` | 0 | ❌ NOT FOUND |

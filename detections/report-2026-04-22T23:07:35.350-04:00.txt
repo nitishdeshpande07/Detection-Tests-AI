@@ -1,0 +1,231 @@
+Here's a technical detection strategy for the described BYOVD ransomware incident, strictly adhering to detection artifacts and logic:
+
+---
+
+### **Incident Analysis & Detection Strategy: Bring Your Own Vulnerable Driver (BYOVD) Ransomware**
+
+**Core Incident Summary:** Ransomware embeds a BYOVD loader to drop and exploit `NsecSoft NSecKrnl driver (CVE-2025-68947)` for Ring 0 access. This allows EDR termination and system encryption in a single, rapid sequence post-initial compromise.
+
+---
+
+### 1. Core Technical Detection Artifacts
+
+**Platform Focus:** Primarily Windows, as BYOVD using `.sys` drivers is a Windows-specific technique. Linux identifiers are provided for completeness regarding potential broader attacker activity or C2 infrastructure.
+
+#### **Windows Based Identifiers:**
+
+*   **Process Creation (Sysmon Event ID 1):**
+    *   `Image`: Potential ransomware payload executable path and name.
+    *   `ParentImage`: Process that executed the ransomware.
+    *   `CommandLine`: Arguments used for execution.
+    *   `Hashes`: MD5, SHA1, SHA256 of the ransomware payload.
+    *   **Suspicious Commands:** `sc.exe create`, `sc.exe start` (less common for BYOVD, as driver loading might be direct or via specific tools/APIs within the payload), `vssadmin.exe Delete Shadows`.
+    *   **Targeted Processes:** Creation of processes known to be used for defense evasion (e.g., `cmd.exe`, `powershell.exe` with suspicious arguments if external tools are used).
+
+*   **File Creation (Sysmon Event ID 11):**
+    *   `TargetFilename`: `NsecKrnl.sys` (case insensitive), likely in `C:\Windows\System32\drivers\` or temporary directories.
+    *   `Image`: Process that created `NsecKrnl.sys`.
+    *   `Hashes`: MD5, SHA1, SHA256 of `NsecKrnl.sys`.
+    *   `TargetFilename`: Ransom notes (e.g., `_README_TO_DECRYPT.txt`, `HOW_TO_RECOVER.html`).
+    *   `TargetFilename`: Encrypted files (detection of high volume of new/modified files with specific extensions).
+
+*   **Driver Loading (Sysmon Event ID 6):**
+    *   `Image`: `NsecKrnl.sys` (CRITICAL artifact).
+    *   `SignatureStatus`: Signed (expected for BYOVD), but `Signature` should indicate `NsecSoft`.
+    *   `SignedBy`: `NsecSoft` or similar vendor name.
+    *   `Hashes`: MD5, SHA1, SHA256 of the loaded `NsecKrnl.sys` driver.
+    *   `Description`: "NsecSoft Kernel Driver" or similar.
+    *   `Product`: "NSecKrnl".
+    *   `Company`: "NsecSoft".
+
+*   **Registry Events (Sysmon Event ID 12, 13, 14):**
+    *   `TargetObject`: Creation of a new service key for `NsecKrnl.sys` under `HKLM\SYSTEM\CurrentControlSet\Services\` (e.g., `HKLM\SYSTEM\CurrentControlSet\Services\NSecKrnl` or a similarly named service).
+    *   `Details`: `ImagePath` pointing to `NsecKrnl.sys`.
+    *   `EventType`: `CreateKey`, `SetValue`.
+
+*   **Process Termination (Sysmon Event ID 5):**
+    *   `Image`: Known EDR/Antivirus processes (e.g., `MsSense.exe`, `csagent.exe`, `Nissrv.exe`, `sophosav.exe`, `waf.exe`, `ccSvcHst.exe`, `defender.exe`, etc.).
+    *   `TargetImage`: The terminated EDR process.
+    *   `InitiatorIsProcess` or `User`: N/A if terminated from Ring 0 by the driver. This makes direct attribution to a userland process difficult, necessitating correlation with driver loading.
+
+*   **Windows Security Event Logs:**
+    *   **Event ID 4697:** A service was installed in the system (for the vulnerable driver).
+        *   `Service Name`: `NSecKrnl` or similar.
+        *   `Service File Name`: Path to `NsecKrnl.sys`.
+    *   **Event ID 7045:** A service was installed on the system (similar to 4697, but from Service Control Manager).
+    *   **Event ID 7034:** The `Service terminated unexpectedly` (for EDR/AV services).
+    *   **Event ID 7036:** The `Service entered the running state` (for the vulnerable driver).
+    *   **Event ID 4624:** Successful Logon (if the ransomware attempts to use compromised credentials or if it's part of a broader lateral movement).
+    *   **Event ID 4663:** An attempt was made to access an object (Auditing SACL on critical EDR files/registry keys could reveal access attempts).
+
+*   **DNS Queries (Sysmon Event ID 22 / Network Logs):**
+    *   Known C2 domains/IPs associated with ransomware campaigns.
+    *   Newly observed or suspicious DNS queries from infected hosts.
+
+*   **Network Connections (Sysmon Event ID 3 / Firewall Logs):**
+    *   Outbound connections to unknown/malicious IP addresses/ports (ransomware C2, exfiltration).
+
+#### **Linux Based Identifiers (Indirect for BYOVD, Relevant for Broader Attack Chain/C2):**
+
+*   **Authentication Logs (`/var/log/auth.log`, `journalctl -u ssh`):**
+    *   Failed/successful SSH logins from unusual IPs.
+    *   Root logins.
+    *   Sudo attempts.
+*   **Process Auditing (`auditd`):**
+    *   `type=EXECVE` for unusual commands or scripts.
+    *   `type=PROCTITLE` for suspicious process names.
+    *   File access patterns (e.g., to `/etc/passwd`, `/etc/shadow`, sensitive data).
+*   **System Logs (`/var/log/syslog`, `dmesg`):**
+    *   Kernel errors, module loading attempts (if attacker tries Linux kernel modules, though not relevant to *this* BYOVD).
+*   **Network Activity (`netstat`, firewall logs):**
+    *   Unusual outbound connections (C2).
+    *   Listeners on unexpected ports.
+*   **File System Monitoring:**
+    *   Creation of new files in sensitive directories (`/tmp`, `/dev/shm`, user home directories).
+    *   Modification of system binaries.
+
+---
+
+### 2. MITRE ATT&CK TTPs
+
+*   **TA0004 - Privilege Escalation:**
+    *   **T1543.003 - Create or Modify System Process: Windows Service:** The core of BYOVD involves installing a vulnerable driver as a service for kernel access.
+    *   **T1068 - Exploitation for Privilege Escalation:** Exploiting the `NsecSoft NSecKrnl` driver vulnerability.
+*   **TA0005 - Defense Evasion:**
+    *   **T1543.003 - Create or Modify System Process: Windows Service:** (Also contributes to defense evasion by establishing kernel control).
+    *   **T1562.001 - Disable or Modify Tools: Antivirus/Endpoint Security Product:** Direct outcome of kernel-mode access to terminate EDR processes.
+    *   **T1484.001 - Group Policy Modification: Group Policy Abuse:** (Implicit, kernel access allows this).
+    *   **T1055 - Process Injection:** (Implicit, kernel access facilitates advanced injection techniques).
+*   **TA0003 - Persistence:**
+    *   **T1543.003 - Create or Modify System Process: Windows Service:** If the driver service is configured for auto-start, it provides persistence.
+*   **TA0008 - Impact:**
+    *   **T1486 - Data Encrypted for Impact:** The primary goal of the ransomware payload.
+    *   **T1490 - Inhibit System Recovery:** Deletion of Volume Shadow Copies (`vssadmin Delete Shadows`).
+*   **TA0002 - Execution:**
+    *   **T1059.003 - Command and Scripting Interpreter: Windows Command Shell:** If `sc.exe`, `vssadmin.exe` are invoked via `cmd.exe`.
+    *   **T1047 - Windows Management Instrumentation:** Potential for WMI to install/start services, though often direct API calls are used.
+
+---
+
+### 3. Detection Logic (KQL/EQL)
+
+**Note:** This logic assumes Sysmon is deployed and collecting relevant event IDs. Adapt field names based on specific SIEM/EDR schema (e.g., `_source_name`, `event_id`, `process_name`, `file_name`, `registry_key`).
+
+#### **KQL (Azure Sentinel / Microsoft Defender for Endpoint)**
+
+```kql
+// Detection 1: NSecKrnl Driver Loading & EDR Termination
+let knownEDRProcesses = dynamic(['MsSense.exe', 'csagent.exe', 'Nissrv.exe', 'sophosav.exe', 'waf.exe', 'ccSvcHst.exe', 'defender.exe', 'crowdstrike.svc', 'mdatp.exe', 'carbonblack.exe']);
+DeviceImageLoadEvents
+| where InitiatingProcessFileName =~ "NsecKrnl.sys" // Note: This might be the driver itself, not the initiating process
+| where FileName =~ "NsecKrnl.sys" // Sysmon Event ID 6 - Driver Loaded
+| where InitiatingProcessSignatureStatus == "Valid" and InitiatingProcessSigner =~ "NsecSoft"
+| join kind=inner (
+    DeviceProcessEvents
+    | where ActionType == "ProcessStopped" // Equivalent to Sysmon Event ID 5
+    | where FileName in (knownEDRProcesses)
+    | extend EDRTerminationTime = EventTime
+) on DeviceId
+| where EDRTerminationTime between (EventTime .. EventTime + 10m) // EDR termination within 10 minutes of driver load
+| project EventTime, DeviceName, InitiatingProcessFileName, FileName, InitiatingProcessSigner, EDRTerminationTime, EDRProcessTerminated = FileName
+| extend Severity = "Critical"
+| extend Description = "BYOVD NsecKrnl driver loaded followed by EDR termination"
+| extend TTPs = "T1543.003, T1068, T1562.001"
+
+// Detection 2: NSecKrnl Driver File Creation & Service Registry Key
+DeviceFileEvents
+| where ActionType == "FileCreated"
+| where FolderPath contains "C:\\Windows\\System32\\drivers\\" or FolderPath has_any ("C:\\ProgramData\\", "C:\\Users\\Public\\") // Common temp/staging paths
+| where FileName =~ "NsecKrnl.sys"
+| join kind=inner (
+    DeviceRegistryEvents
+    | where ActionType == "RegistryKeyCreated" or ActionType == "RegistryValueSet"
+    | where RegistryKey contains "SYSTEM\\CurrentControlSet\\Services\\" and RegistryKey has "NsecKrnl"
+    | where RegistryValueData contains "NsecKrnl.sys" // Ensure image path in service config points to the driver
+    | extend RegistryEventTime = EventTime
+) on DeviceId
+| where RegistryEventTime between (EventTime .. EventTime + 5m) // Registry event within 5 minutes of file creation
+| project EventTime, DeviceName, InitiatingProcessFileName, FileName, RegistryKey, RegistryValueData
+| extend Severity = "High"
+| extend Description = "BYOVD NsecKrnl driver file dropped and service configured in registry"
+| extend TTPs = "T1543.003, T1068"
+
+// Detection 3: Volume Shadow Copy Deletion after Driver Load
+DeviceProcessEvents
+| where ActionType == "ProcessCreated"
+| where FileName =~ "vssadmin.exe" and CommandLine contains "Delete Shadows"
+| join kind=inner (
+    DeviceImageLoadEvents
+    | where FileName =~ "NsecKrnl.sys"
+    | where InitiatingProcessSignatureStatus == "Valid" and InitiatingProcessSigner =~ "NsecSoft"
+    | extend DriverLoadTime = EventTime
+) on DeviceId
+| where EventTime between (DriverLoadTime .. DriverLoadTime + 30m) // VSS deletion within 30 minutes of driver load
+| project EventTime, DeviceName, InitiatingProcessFileName, FileName, CommandLine, DriverLoadTime
+| extend Severity = "High"
+| extend Description = "Volume Shadow Copy deletion after BYOVD NsecKrnl driver load"
+| extend TTPs = "T1490"
+
+// Detection 4: High Volume File Encryption (Generic Ransomware)
+let encryption_extensions = dynamic(['.encrypted', '.lock', '.ransom', '.rn', '.crypt', '.nck', '.enc', '.secured', '.pwned']); // Add specific ransomware extensions for NsecSoft variant if known
+DeviceFileEvents
+| where ActionType == "FileCreated" or ActionType == "FileRenamed"
+| where TargetFileName endswith_any (encryption_extensions) or InitiatingProcessFileName =~ "ransomware_payload_name.exe" // Use known ransomware payload name/hash if possible
+| summarize FileCount = count() by bin(EventTime, 5m), DeviceName, InitiatingProcessFileName
+| where FileCount > 50 // Threshold for high volume, adjust as needed
+| project EventTime, DeviceName, InitiatingProcessFileName, FileCount
+| extend Severity = "High"
+| extend Description = "High volume file encryption indicating ransomware activity"
+| extend TTPs = "T1486"
+```
+
+#### **EQL (Elastic Security)**
+
+```eql
+// Detection 1: NSecKrnl Driver Loading & EDR Termination
+sequence by host.id with maxspan=10m
+  [kernel where event.action == "driver_loaded" and file.name : "NsecKrnl.sys" and file.code_signature.subject_name : "NsecSoft" and file.code_signature.status : "valid"]
+  [process where event.type == "end" and process.name in ("MsSense.exe", "csagent.exe", "Nissrv.exe", "sophosav.exe", "waf.exe", "ccSvcHst.exe", "defender.exe")]
+
+// Detection 2: NSecKrnl Driver File Creation & Service Registry Key
+sequence by host.id with maxspan=5m
+  [file where event.action == "file_create" and file.path : ("C:\\Windows\\System32\\drivers\\NsecKrnl.sys", "C:\\ProgramData\\*\\NsecKrnl.sys", "C:\\Users\\Public\\*\\NsecKrnl.sys")]
+  [registry where event.action == "registry_key_create" or event.action == "registry_value_set" and registry.path : "HKLM\\SYSTEM\\CurrentControlSet\\Services\\*NsecKrnl*" and registry.data.strings : "*NsecKrnl.sys*"]
+
+// Detection 3: Volume Shadow Copy Deletion after Driver Load
+sequence by host.id with maxspan=30m
+  [kernel where event.action == "driver_loaded" and file.name : "NsecKrnl.sys" and file.code_signature.subject_name : "NsecSoft" and file.code_signature.status : "valid"]
+  [process where event.action == "exec" and process.name == "vssadmin.exe" and process.args : "Delete Shadows"]
+
+// Detection 4: High Volume File Encryption (Generic Ransomware)
+// This is harder to do purely with a single EQL rule due to stateful counting. 
+// Requires aggregation in the SIEM. Example for single file detection:
+any where (event.action == "file_create" or event.action == "file_rename") and
+(file.extension in ("encrypted", "lock", "ransom", "rn", "crypt", "nck", "enc", "secured", "pwned") or process.executable.hash.sha256 == "<Ransomware_Payload_SHA256>")
+// For high volume, a threshold-based rule in Elastic SIEM using background queries or transforms would be more appropriate.
+```
+
+---
+
+### 4. Rough Detection Rule Structure
+
+```
+Rule Name: <Descriptive Name e.g., BYOVD NsecKrnl Driver Load & EDR Kill>
+Description: <Detailed description of the detection logic and incident context>
+Severity: <Critical/High/Medium>
+Technique: <MITRE ATT&CK TTPs, e.g., T1543.003, T1068, T1562.001, T1490>
+Query Language: <KQL/EQL>
+Query: 
+    <Insert KQL/EQL logic here>
+
+False Positives:
+    - Legitimate loading of the NsecSoft NSecKrnl driver (highly unlikely to be legitimate in most enterprise environments if not explicitly deployed and managed).
+    - Unrelated EDR termination if the timing window is too broad.
+    - Test/Dev environments where drivers might be loaded outside normal procedures.
+
+Notes:
+    - Requires Sysmon (or equivalent EDR logs) for detailed process, file, registry, and driver events.
+    - Specific ransomware payload hash/name should be updated if known.
+    - `NsecSoft NSecKrnl.sys` hash (if available) should be explicitly included in the query for precision.
+    - This rule focuses on the post-exploitation phase; initial access and privilege escalation leading to admin rights are prerequisites.
+```

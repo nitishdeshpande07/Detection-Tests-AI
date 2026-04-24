@@ -1,0 +1,295 @@
+```json
+{
+  "detection_scenario": "Mark-of-the-Web Bypass and Qakbot Reconnaissance",
+  "threat_actor": "Qakbot (via BlackBasta)",
+  "bypass_technique": "T1553.005 - Subvert Trust Controls: Mark-of-the-Web Bypass (ISO file delivery)",
+  "delivery_method": "Email with link to encrypted .zip containing .iso",
+  "detection_focus": [
+    "Initial Access (email/download)",
+    "Defense Evasion (ISO mounting, MotW bypass)",
+    "Execution (from mounted ISO)",
+    "Reconnaissance (post-initial execution by Qakbot)"
+  ],
+  "technical_details": {
+    "1_core_technical_detection_artifacts": {
+      "windows_based_identifiers": {
+        "event_ids": {
+          "security_log": [
+            "4688 - A new process has been created (for execution monitoring)"
+          ],
+          "sysmon": [
+            "1 - Process Creation (crucial for execution paths, command lines, parent-child)",
+            "3 - Network Connection (for initial download and Qakbot C2)",
+            "7 - Image Loaded (for suspicious DLLs loaded by processes from unusual paths)",
+            "11 - FileCreate (for creation of ISOs, LNKs, DLLs in temp/download directories)",
+            "12/13/14 - Registry Events (less direct for bypass, but can show volume mount points or changes related to new drives)",
+            "23 - FileDelete (if files are cleaned up after execution)"
+          ],
+          "operational_logs": [
+            "Microsoft-Windows-VHDMP/Operational: 1 - Virtual Disk Action (VHD/ISO attach/mount)",
+            "Microsoft-Windows-Shell-Core/Operational: 9827 - Virtual Drive Event (ISO mounting/unmounting activity)",
+            "Microsoft-Windows-Kernel-General: 10 - Mounted Volume (Identifies new drive letters)"
+          ]
+        },
+        "fields_and_logs": {
+          "process_creation_events": [
+            "process.executable (e.g., explorer.exe, powershell.exe, cmd.exe, rundll32.exe)",
+            "process.command_line",
+            "process.parent.executable",
+            "process.args",
+            "file.path (especially paths indicating mounted ISOs like D:\\, E:\\, or dynamically created mount points)",
+            "file.extension (e.g., .iso, .zip, .lnk, .dll, .exe)"
+          ],
+          "file_system_events": [
+            "file.path (creation/access of .zip, .iso, .lnk, .dll, .exe files)",
+            "file.hash.md5/sha256",
+            "file.name",
+            "file.extension"
+          ],
+          "network_connection_events": [
+            "destination.ip",
+            "destination.port",
+            "source.ip",
+            "url.full (for initial download)",
+            "http.request.method",
+            "http.response.status_code",
+            "user_agent.original"
+          ],
+          "volume_events": [
+            "event.code (1 from VHDMP, 9827 from Shell-Core)",
+            "Message (describing the virtual disk operation, e.g., 'Attached virtual disk')",
+            "VolumeName",
+            "DriveLetter"
+          ],
+          "email_logs": [
+            "email.from.address",
+            "email.to.address",
+            "email.subject",
+            "email.url (if link provided for download)",
+            "email.attachment.name",
+            "email.attachment.hash"
+          ]
+        },
+        "indicators": [
+          "Detection of '.iso' file downloads.",
+          "Process execution from removable/virtual drive paths (e.g., `D:\\`, `E:\\` if dynamically mounted).",
+          "Parent process `explorer.exe` launching `cmd.exe`, `powershell.exe`, or `rundll32.exe` from a virtual drive.",
+          "Presence of `.lnk` or `.dll` files being executed from newly mounted volumes.",
+          "Specific Qakbot reconnaissance command lines being executed.",
+          "Unusual network connections to known Qakbot C2 IPs/domains."
+        ]
+      },
+      "linux_based_identifiers": {
+        "event_ids": [],
+        "fields_and_logs": {
+          "proxy_logs": [
+            "url.full (requests for .zip or .iso files)",
+            "http.request.method",
+            "http.response.status_code",
+            "user_agent.original",
+            "source.ip",
+            "destination.ip"
+          ],
+          "mail_gateway_logs": [
+            "email.from.address",
+            "email.to.address",
+            "email.subject",
+            "email.url (for phishing links)",
+            "email.attachment.name",
+            "email.attachment.type",
+            "email.headers"
+          ],
+          "web_server_logs": [
+            "url.original (for serving malicious files)",
+            "http.request.method",
+            "http.response.status_code",
+            "client.ip",
+            "user_agent.original"
+          ]
+        },
+        "indicators": [
+          "Mail gateway logs showing emails with suspicious links/attachments (encrypted .zip, .iso, password in body).",
+          "Proxy logs showing downloads of .zip or .iso files from unusual or untrusted sources."
+        ]
+      }
+    },
+    "2_mitre_ttps": [
+      {
+        "id": "T1566.001",
+        "name": "Phishing: Spearphishing Attachment",
+        "description": "Delivery of encrypted .zip via email containing malicious content."
+      },
+      {
+        "id": "T1566.002",
+        "name": "Phishing: Spearphishing Link",
+        "description": "Email contains a link to download the encrypted .zip."
+      },
+      {
+        "id": "T1553.005",
+        "name": "Subvert Trust Controls: Mark-of-the-Web Bypass",
+        "description": "Using an ISO file to bypass MotW, allowing direct execution of its contents without security warnings."
+      },
+      {
+        "id": "T1204.002",
+        "name": "User Execution: Malicious File",
+        "description": "Victim mounts the ISO and executes the malicious payload (e.g., LNK, DLL) within."
+      },
+      {
+        "id": "T1059",
+        "name": "Command and Scripting Interpreter",
+        "description": "Malicious LNK files or scripts within the ISO may invoke cmd.exe or powershell.exe for execution."
+      },
+      {
+        "id": "T1036.003",
+        "name": "Masquerading: Rename System Utilities",
+        "description": "Qakbot may rename its payloads or legitimate utilities to evade detection."
+      },
+      {
+        "id": "T1036.004",
+        "name": "Masquerading: Unicode Character",
+        "description": "Qakbot may use Unicode characters in filenames to obfuscate and confuse users."
+      },
+      {
+        "id": "T1082",
+        "name": "System Information Discovery",
+        "description": "Qakbot executes commands like 'systeminfo', 'wmic cs get name,model,manufacturer,systemtype', 'hostname'."
+      },
+      {
+        "id": "T1016",
+        "name": "System Network Configuration Discovery",
+        "description": "Qakbot executes commands like 'ipconfig /all', 'route print', 'netstat -an'."
+      },
+      {
+        "id": "T1033",
+        "name": "System Owner/User Discovery",
+        "description": "Qakbot executes commands like 'whoami', 'query user', 'net user'."
+      },
+      {
+        "id": "T1049",
+        "name": "System Network Connections Discovery",
+        "description": "Qakbot executes commands like 'netstat -na'."
+      },
+      {
+        "id": "T1007",
+        "name": "System Service Discovery",
+        "description": "Qakbot executes commands like 'sc query type= service'."
+      },
+      {
+        "id": "T1087.001",
+        "name": "Account Discovery: Local Account",
+        "description": "Qakbot executes commands like 'net user'."
+      },
+      {
+        "id": "T1087.002",
+        "name": "Account Discovery: Domain Account",
+        "description": "Qakbot executes commands like 'net user /domain'."
+      },
+      {
+        "id": "T1069.001",
+        "name": "Permission Groups Discovery: Local Groups",
+        "description": "Qakbot executes commands like 'net localgroup'."
+      },
+      {
+        "id": "T1069.002",
+        "name": "Permission Groups Discovery: Domain Groups",
+        "description": "Qakbot executes commands like 'net group /domain'."
+      },
+      {
+        "id": "T1482",
+        "name": "Domain Trust Discovery",
+        "description": "Qakbot executes commands like 'nltest /domain_trusts'."
+      }
+    ],
+    "3_detection_logic": {
+      "elastic_kql_eql": {
+        "scenario_1_suspicious_archive_download_or_mount": {
+          "name": "Suspicious Archive/ISO Download/Mount",
+          "description": "Detects the download of potential ISO or ZIP files from web/mail sources, or the mounting of ISOs.",
+          "kql_email_proxy_download": "(event.category: (network or email) AND url.extension: (\"zip\" or \"iso\" or \"img\" or \"vhd\") AND (source.ip != \"internal_ranges\" OR destination.ip != \"internal_ranges\")) OR (email.attachment.name: (*.zip AND *password*) OR email.body: (*password* AND *.zip OR *.iso))",
+          "kql_iso_mount_event": "event.provider: (\"Microsoft-Windows-VHDMP\" AND event.code: 1 AND Message: \"Attached virtual disk\") OR (event.provider: \"Microsoft-Windows-Shell-Core\" AND event.code: 9827 AND (Message: \"Virtual Drive Event\" OR Message: \"Mount event\"))",
+          "eql_iso_mount_process_pattern": "sequence by host.id\n  [file where file.extension : (\"iso\", \"img\", \"vhd\") and event.type == \"creation\"]\n  [process where event.type == \"start\" and process.executable : (\"explorer.exe\") and process.command_line : \"*\" and process.args : (\"mount\", \"dismount\") and file.path : (\"C:\\\\Users\\\\*\\\\Downloads\\\\*.iso\")]",
+          "comment": "Combines network/mail delivery detection with endpoint-level ISO mount events. The EQL query looks for an ISO file being created then explorer mounting it."
+        },
+        "scenario_2_execution_from_mounted_iso": {
+          "name": "Execution from Recently Mounted ISO Volume",
+          "description": "Detects process creation from drive letters corresponding to newly mounted virtual drives, especially for common Qakbot payloads.",
+          "kql": "event.category: \"process\" AND event.type: \"start\" AND process.executable: (\"cmd.exe\" OR \"powershell.exe\" OR \"pwsh.exe\" OR \"rundll32.exe\" OR \"mshta.exe\" OR \"wscript.exe\" OR \"cscript.exe\" OR \"msiexec.exe\" OR \"regsvr32.exe\") AND process.command_line: ((\"*\\\\*.lnk*\" OR \"*\\\\*.dll*\") AND (\"D:\\\\*\" OR \"E:\\\\*\" OR \"F:\\\\*\" OR \"G:\\\\*\" OR \"H:\\\\*\" OR \"I:\\\\*\" OR \"J:\\\\*\" OR \"K:\\\\*\")) AND NOT process.command_line: \"C:\\\\Windows\\\\System32\\\\*\" AND NOT process.parent.executable: (\"C:\\\\Windows\\\\explorer.exe\" AND process.command_line: \"*\\\\system32\\\\dvd_icon.dll*\")",
+          "eql": "process where event.type == \"start\" and process.executable in (\"cmd.exe\", \"powershell.exe\", \"pwsh.exe\", \"rundll32.exe\", \"mshta.exe\", \"wscript.exe\", \"cscript.exe\", \"msiexec.exe\", \"regsvr32.exe\") and\n  (process.command_line : (\"*\\\\*.lnk*\", \"*\\\\*.dll*\") and\n   process.executable : (\"*\\\\D:\\\\*\", \"*\\\\E:\\\\*\", \"*\\\\F:\\\\*\", \"*\\\\G:\\\\*\", \"*\\\\H:\\\\*\", \"*\\\\I:\\\\*\", \"*\\\\J:\\\\*\", \"*\\\\K:\\\\*\")) and\n  not process.command_line : \"C:\\\\Windows\\\\System32\\\\*\" and\n  not process.parent.executable == \"explorer.exe\" and not process.command_line : \"*dvd_icon.dll*\"",
+          "comment": "Focuses on common scripting/loader executables being launched from dynamically assigned drive letters, which is characteristic of ISO mounts. Excludes known legitimate actions."
+        },
+        "scenario_3_suspicious_child_process_from_explorer_after_iso_mount": {
+          "name": "Suspicious Child Process from Explorer after ISO Mount",
+          "description": "Detects `explorer.exe` launching unusual processes (like cmd/powershell/DLL loaders) from non-standard paths, often indicative of clicking on a malicious LNK or executable inside a mounted ISO.",
+          "kql": "event.category: \"process\" AND event.type: \"start\" AND process.parent.executable: \"explorer.exe\" AND process.executable: (\"cmd.exe\" OR \"powershell.exe\" OR \"pwsh.exe\" OR \"rundll32.exe\" OR \"mshta.exe\" OR \"wscript.exe\" OR \"cscript.exe\") AND process.executable.path: (\"D:\\\\*\" OR \"E:\\\\*\" OR \"F:\\\\*\" OR \"G:\\\\*\" OR \"H:\\\\*\" OR \"I:\\\\*\" OR \"J:\\\\*\" OR \"K:\\\\*\") AND NOT process.command_line: (\"*\\\\system32\\\\dvd_icon.dll*\" OR \"*\\\\.lnk\" OR \"*\\\\windows\\\\system32\\\\vsc.exe\")",
+          "eql": "process where event.type == \"start\" and\n  process.parent.executable == \"explorer.exe\" and\n  process.executable in (\"cmd.exe\", \"powershell.exe\", \"pwsh.exe\", \"rundll32.exe\", \"mshta.exe\", \"wscript.exe\", \"cscript.exe\") and\n  process.executable.path : (\"D:\\\\*\", \"E:\\\\*\", \"F:\\\\*\", \"G:\\\\*\", \"H:\\\\*\", \"I:\\\\*\", \"J:\\\\*\", \"K:\\\\*\") and\n  not process.command_line : (\"*\\\\system32\\\\dvd_icon.dll*\", \"*\\\\.lnk\", \"*\\\\windows\\\\system32\\\\vsc.exe\")",
+          "comment": "Refined for `explorer.exe` as the parent, which would be common if a user double-clicks an item in the ISO."
+        },
+        "scenario_4_qakbot_reconnaissance_commands": {
+          "name": "Qakbot Post-Compromise Reconnaissance Commands",
+          "description": "Detects execution of common Qakbot reconnaissance commands post-initial access.",
+          "kql": "event.category: \"process\" AND event.type: \"start\" AND process.executable: (\"cmd.exe\" OR \"powershell.exe\") AND process.command_line: (\n  \"*systeminfo*\" OR \n  \"*wmic cs get name,model,manufacturer,systemtype*\" OR \n  \"*hostname*\" OR \n  \"*ipconfig /all*\" OR \n  \"*route print*\" OR \n  \"*netstat -an*\" OR \n  \"*whoami*\" OR \n  \"*query user*\" OR \n  \"*net user /domain*\" OR \n  \"*net localgroup*\" OR \n  \"*net group /domain*\" OR \n  \"*nltest /domain_trusts*\" OR \n  \"*sc query type= service*\"\n)",
+          "eql": "process where event.type == \"start\" and\n  process.executable in (\"cmd.exe\", \"powershell.exe\") and\n  process.command_line : (\n    \"*systeminfo*\", \n    \"*wmic cs get name,model,manufacturer,systemtype*\", \n    \"*hostname*\", \n    \"*ipconfig /all*\", \n    \"*route print*\", \n    \"*netstat -an*\", \n    \"*whoami*\", \n    \"*query user*\", \n    \"*net user /domain*\", \n    \"*net localgroup*\", \n    \"*net group /domain*\", \n    \"*nltest /domain_trusts*\", \n    \"*sc query type= service*\"\n  )",
+          "comment": "These are common commands Qakbot uses for discovery. High potential for FPs if not baselined or correlated."
+        }
+      }
+    },
+    "4_rough_detection_rule_structure": [
+      {
+        "rule_name": "Qakbot MotW Bypass - Suspicious ISO/Archive Delivery & Mount",
+        "description": "Detects download of encrypted ZIP/ISO or mounting of ISO files, indicative of Qakbot's initial access and Mark-of-the-Web bypass attempt.",
+        "severity": "Medium",
+        "false_positives": [
+          "Legitimate software distributed as ISOs (e.g., OS installers, large applications).",
+          "Users legitimately sharing password-protected ZIPs.",
+          "IT staff mounting ISOs for software installation."
+        ],
+        "mitre_ttps": [
+          "T1566.001",
+          "T1566.002",
+          "T1553.005"
+        ],
+        "query": "((event.category: (network or email) AND url.extension: (\"zip\" or \"iso\" or \"img\" or \"vhd\") AND (source.ip != \"internal_ranges\" OR destination.ip != \"internal_ranges\")) OR (email.attachment.name: (*.zip AND *password*) OR email.body: (*password* AND *.zip OR *.iso))) OR (event.provider: (\"Microsoft-Windows-VHDMP\" AND event.code: 1 AND Message: \"Attached virtual disk\") OR (event.provider: \"Microsoft-Windows-Shell-Core\" AND event.code: 9827 AND (Message: \"Virtual Drive Event\" OR Message: \"Mount event\")))"
+      },
+      {
+        "rule_name": "Qakbot MotW Bypass - Execution from Mounted ISO",
+        "description": "Identifies execution of suspicious executables, scripts, or DLLs from dynamically mounted virtual drives, often seen after a MotW bypass via ISO.",
+        "severity": "High",
+        "false_positives": [
+          "Specific legitimate applications that might execute from virtual drives (rare, requires whitelisting).",
+          "System utilities called from non-standard paths (less common for ISOs, but possible for IT tools)."
+        ],
+        "mitre_ttps": [
+          "T1553.005",
+          "T1204.002",
+          "T1059",
+          "T1036.003"
+        ],
+        "query": "event.category: \"process\" AND event.type: \"start\" AND process.executable: (\"cmd.exe\" OR \"powershell.exe\" OR \"pwsh.exe\" OR \"rundll32.exe\" OR \"mshta.exe\" OR \"wscript.exe\" OR \"cscript.exe\" OR \"msiexec.exe\" OR \"regsvr32.exe\") AND process.command_line: ((\"*\\\\*.lnk*\" OR \"*\\\\*.dll*\") AND (\"D:\\\\*\" OR \"E:\\\\*\" OR \"F:\\\\*\" OR \"G:\\\\*\" OR \"H:\\\\*\" OR \"I:\\\\*\" OR \"J:\\\\*\" OR \"K:\\\\*\")) AND NOT process.command_line: \"C:\\\\Windows\\\\System32\\\\*\" AND NOT process.parent.executable: (\"C:\\\\Windows\\\\explorer.exe\" AND process.command_line: \"*\\\\system32\\\\dvd_icon.dll*\")"
+      },
+      {
+        "rule_name": "Qakbot Post-Compromise Reconnaissance Commands",
+        "description": "Detects the execution of known system and network discovery commands commonly used by Qakbot after initial compromise.",
+        "severity": "Medium",
+        "false_positives": [
+          "Legitimate administrative or troubleshooting activities.",
+          "Automated scripts or tools for inventory/auditing.",
+          "Security tools performing similar discovery."
+        ],
+        "mitre_ttps": [
+          "T1082",
+          "T1016",
+          "T1033",
+          "T1049",
+          "T1007",
+          "T1087.001",
+          "T1087.002",
+          "T1069.001",
+          "T1069.002",
+          "T1482"
+        ],
+        "query": "event.category: \"process\" AND event.type: \"start\" AND process.executable: (\"cmd.exe\" OR \"powershell.exe\") AND process.command_line: (\n  \"*systeminfo*\" OR \n  \"*wmic cs get name,model,manufacturer,systemtype*\" OR \n  \"*hostname*\" OR \n  \"*ipconfig /all*\" OR \n  \"*route print*\" OR \n  \"*netstat -an*\" OR \n  \"*whoami*\" OR \n  \"*query user*\" OR \n  \"*net user /domain*\" OR \n  \"*net localgroup*\" OR \n  \"*net group /domain*\" OR \n  \"*nltest /domain_trusts*\" OR \n  \"*sc query type= service*\"\n)"
+      }
+    ]
+  }
+}
+```
